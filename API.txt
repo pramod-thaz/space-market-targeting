@@ -1,0 +1,12 @@
+41c040c0887daed3b8ebb0da14a2215f3cd70f84
+
+
+
+conda install jupyter
+conda install nb_conda
+conda install ipykernel
+python -m ipykernel install --user --name CENSUS-VIZ
+
+
+Command Line Cartography
+https://medium.com/@mbostock/command-line-cartography-part-1-897aa8f8ca2c
