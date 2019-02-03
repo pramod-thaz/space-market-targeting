@@ -210,4 +210,6 @@ dependencies:
     - msgpack==0.5.6
     - tqdm==4.29.1
     - us==1.0.0
+    - topojson==1.0rc1
+    - geojson==2.4.1
 
