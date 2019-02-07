@@ -28,7 +28,7 @@ census_client.acs5._switch_endpoints = _switch_endpoints
 
 state = states.lookup('Texas')
 
-total_population = 'B00001_001E'
+total_population = 'B01001_001E'
 household_income = 'B19001_001E'
 median_home_value = 'B25077_001E'
 median_income_value = 'B06011_001E'
@@ -43,20 +43,30 @@ unemployed_male_above_poverty = 'B17005_017E'
 female_above_poverty = 'B17005_020E'
 unemployed_female_above_poverty = 'B17005_022E'
 
+# ethnic mix
+white_population = 'B01001A_001E'
+black_population = 'B01001B_001E'
+american_indian_population = 'B01001C_001E'
+asian_population = 'B01001D_001E'
+native_hawaiian_population = 'B01001E_001E'
+hispanic_population = 'B01001I_001E'
+other_race_population = 'B01001F_001E'
 
-tract_raw_data_2017 = census_client.acs5.state_county(
+print('Requesting 2017 year data for tracts')
+tract_raw_data_2017 = census_client.acs5.state_county_tract(
     ('NAME', total_population, household_income, median_home_value, median_income_value,
      male_below_poverty, unemployed_male_below_poverty, female_below_poverty, unemployed_female_below_poverty,
-     male_above_poverty, unemployed_male_above_poverty, female_above_poverty, unemployed_female_above_poverty),
-    state.fips, Census.ALL, year=2017
+     male_above_poverty, unemployed_male_above_poverty, female_above_poverty, unemployed_female_above_poverty,
+     white_population, black_population, american_indian_population, asian_population, native_hawaiian_population,
+     hispanic_population, other_race_population),
+    state.fips, Census.ALL, Census.ALL, year=2017
 )
 data_2017 = pd.DataFrame.from_records(tract_raw_data_2017)
-data_2017 = data_2017.rename(columns={
-    total_population: 'population_2017',
-    household_income: 'household_income_2017',
-    median_home_value: 'median_home_value_2017',
-    median_income_value: 'median_income_value_2017'
-})
+for column in data_2017:
+    if column in ('NAME', 'county', 'state', 'tract'):
+        continue
+    data_2017[column] = data_2017[column].astype(float, errors='ignore')
+
 data_2017['unemployment_rate_pct_2017'] = (
     (data_2017[unemployed_male_below_poverty] + data_2017[unemployed_male_above_poverty] +
      data_2017[unemployed_female_below_poverty] + data_2017[unemployed_female_above_poverty]) /
@@ -64,10 +74,35 @@ data_2017['unemployment_rate_pct_2017'] = (
      data_2017[female_below_poverty] + data_2017[female_above_poverty])
 ) * 100
 
-tract_raw_data_2010 = census_client.acs5.state_county(
-    ('NAME', total_population, household_income, median_home_value),
-    state.fips, Census.ALL, year=2010
+races_sum = (
+    data_2017[white_population] + data_2017[black_population] + data_2017[american_indian_population] +
+    data_2017[asian_population] + data_2017[native_hawaiian_population] + data_2017[hispanic_population] +
+    data_2017[other_race_population]
 )
+data_2017['white_race_pct'] = data_2017[white_population] / races_sum * 100
+data_2017['black_race_pct'] = data_2017[black_population] / races_sum * 100
+data_2017['asian_race_pct'] = data_2017[asian_population] / races_sum * 100
+data_2017['hispanic_race_pct'] = data_2017[hispanic_population] / races_sum * 100
+data_2017['other_race_pct'] = data_2017[other_race_population] / races_sum * 100
+
+data_2017 = data_2017.rename(columns={
+    total_population: 'population_2017',
+    household_income: 'household_income_2017',
+    median_home_value: 'median_home_value_2017',
+    median_income_value: 'median_income_value_2017',
+    'NAME': 'tract_name'
+})
+
+# census.gov doesn't allow requesting all tracts in one request for 2010 year.
+print('Requesting 2010 year data for tracts')
+tract_raw_data_2010 = []
+for county in tqdm(data_2017['county'].unique()):
+    county_data = census_client.acs5.state_county_tract(
+        ('NAME', total_population, household_income, median_home_value),
+        state.fips, county, Census.ALL, year=2010
+    )
+    tract_raw_data_2010.extend(county_data)
+
 data_2010 = pd.DataFrame.from_records(tract_raw_data_2010)
 data_2010 = data_2010.rename(columns={
     total_population: 'population_2010',
@@ -76,15 +111,16 @@ data_2010 = data_2010.rename(columns={
 })
 
 
-data = pd.merge(left=data_2010, right=data_2017, on=['NAME', 'county', 'state'])
+data = pd.merge(left=data_2010, right=data_2017, on=['state', 'county', 'tract'])
 data['population_growth_pct'] = ((data['population_2017'].astype(float) /
                                   data['population_2010'].astype(float)) - 1) * 100
 data['household_income_growth_pct'] = ((data['household_income_2017'].astype(float) /
                                         data['household_income_2010'].astype(float)) - 1) * 100
 data['median_home_value_growth_pct'] = ((data['median_home_value_2017'].astype(float) /
                                          data['median_home_value_2010'].astype(float)) - 1) * 100
-data = data[['NAME', 'county', 'population_growth_pct', 'household_income_growth_pct',
-             'median_home_value_growth_pct', 'median_income_value_2017', 'unemployment_rate_pct_2017']]
+data = data[['tract_name', 'county', 'tract', 'population_growth_pct', 'household_income_growth_pct',
+             'median_home_value_growth_pct', 'median_income_value_2017', 'unemployment_rate_pct_2017',
+             'white_race_pct', 'black_race_pct', 'asian_race_pct', 'hispanic_race_pct', 'other_race_pct']]
 
 
 def download_shapefile(url, bbox=None):
@@ -102,12 +138,15 @@ def download_shapefile(url, bbox=None):
         return boundaries
 
 
-county_boundaries = download_shapefile(state.shapefile_urls()['county'])
-county_boundaries = county_boundaries[['geometry', 'COUNTYFP10']]
-result = pd.merge(county_boundaries, data, left_on=['COUNTYFP10'], right_on=['county'])
+print('Downloading boundaries file')
+county_boundaries = download_shapefile(state.shapefile_urls()['tract'])
+county_boundaries = county_boundaries[['geometry', 'COUNTYFP10', 'TRACTCE10']]
+result = pd.merge(county_boundaries, data, left_on=['COUNTYFP10', 'TRACTCE10'], right_on=['county', 'tract'])
 # this one generates a warning, need to update geopandas
-result.to_file('census_county_data.geojson', driver="GeoJSON")
+print('Saving to GeoJSON')
+result.to_file('census_tract_data.geojson', driver="GeoJSON")
 
+print('Saving to TopoJSON')
 tj_data = topojson.topology(result)
-with open('census_county_data.topojson', 'w') as fp:
+with open('census_tract_data.topojson', 'w') as fp:
     json.dump(tj_data, fp)
